@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 type Crawler struct {
@@ -29,31 +30,66 @@ func New(urls []string, logger *slog.Logger) *Crawler {
 }
 
 func (t *Crawler) Start() {
-	for _, url := range t.queue {
-		t.parse(url)
+
+	processCounter := 0
+
+	for {
+		if processCounter >= len(t.queue) {
+			t.logger.Info("All links have been scraped")
+			return
+		}
+
+		url := t.queue[processCounter]
+
+		_, statusCode, contentType, err := t.fetchHTML(url)
+		if err != nil {
+			//TODO handle other errors properly
+			t.logger.Error("Fetch HTML error", slog.String("error", err.Error()))
+		}
+		t.logger.Info("Fetched",
+			slog.String("url", url),
+			slog.Int("status_code", statusCode),
+		)
+
+		if statusCode == 403 {
+		}
+
+		if contentType == "" {
+		}
+
+		fmt.Println()
+		processCounter += 1
 	}
 
 }
 
-func (t *Crawler) parse(url string) {
-	fmt.Printf("Fetching %s", url)
+func (t *Crawler) fetchHTML(url string) (string, int, string, error) {
+	fmt.Printf("Fetching %s \n", url)
 
 	r, err := http.Get(url)
 
 	if err != nil {
-		t.logger.Error("Fetching url error")
-		return
+		return "", r.StatusCode, "", fmt.Errorf("fetching url  %v", err)
 	}
 
-	contentType := r.Header.Get("Content-Type")
+	contentHeaders := strings.SplitN(r.Header.Get("Content-Type"), ";", 2)
 
-	fmt.Println("content type is: ", contentType)
+	if len(contentHeaders) == 0 {
+		return "", r.StatusCode, "", fmt.Errorf("Paring content : %v", strings.Join(contentHeaders, ";"))
+	}
+
+	contentType := contentHeaders[0]
+
+	if contentType != "text/html" {
+		return "", r.StatusCode, contentType, fmt.Errorf("Invalid content type: %v", contentType)
+	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		return "", r.StatusCode, contentType, fmt.Errorf("Body reading error: %v", err)
+	}
+
 	bodyString := string(bodyBytes)
 
-	fmt.Println(bodyString)
-
-	fmt.Printf("\n%+v", r)
-
+	return bodyString, r.StatusCode, contentType, nil
 }
