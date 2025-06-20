@@ -41,7 +41,7 @@ func (t *Crawler) Start() {
 
 		url := t.queue[processCounter]
 
-		_, statusCode, contentType, err := t.fetchHTML(url)
+		htmlStr, statusCode, contentType, err := t.fetchHTML(url)
 		if err != nil {
 			//TODO handle other errors properly
 			t.logger.Error("Fetch HTML error", slog.String("error", err.Error()))
@@ -50,6 +50,13 @@ func (t *Crawler) Start() {
 			slog.String("url", url),
 			slog.Int("status_code", statusCode),
 		)
+
+		reader := strings.NewReader(htmlStr)
+		extractedURLs, err := extractContent(reader, url)
+		if err != nil {
+			t.logger.Error(err.Error())
+		}
+		fmt.Printf("\n %v", extractedURLs)
 
 		if statusCode == 403 {
 		}
@@ -72,6 +79,8 @@ func (t *Crawler) fetchHTML(url string) (string, int, string, error) {
 		return "", r.StatusCode, "", fmt.Errorf("fetching url  %v", err)
 	}
 
+	defer r.Body.Close()
+
 	contentHeaders := strings.SplitN(r.Header.Get("Content-Type"), ";", 2)
 
 	if len(contentHeaders) == 0 {
@@ -89,7 +98,5 @@ func (t *Crawler) fetchHTML(url string) (string, int, string, error) {
 		return "", r.StatusCode, contentType, fmt.Errorf("Body reading error: %v", err)
 	}
 
-	bodyString := string(bodyBytes)
-
-	return bodyString, r.StatusCode, contentType, nil
+	return string(bodyBytes), r.StatusCode, contentType, nil
 }
