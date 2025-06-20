@@ -5,17 +5,29 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 )
 
-func extractContent(reader io.Reader, domain string) ([]string, error) {
+type Website struct {
+	url string
+	// TODO use string builder for perforance
+	content   string
+	title     []string
+	headings  string
+	outlinks  []string
+	images    []string
+	crawledAt time.Time
+}
+
+func extractContent(reader io.Reader, domain string) (*Website, error) {
 	fmt.Println("running extract content")
-	urls := []string{}
 	doc, err := html.Parse(reader)
+	website := Website{}
 
 	if err != nil {
-		return urls, fmt.Errorf("Parsing html error: %v", err)
+		return &website, fmt.Errorf("Parsing html error: %v", err)
 	}
 
 	var f func(*html.Node)
@@ -24,7 +36,7 @@ func extractContent(reader io.Reader, domain string) ([]string, error) {
 			return
 		}
 
-		// links
+		//parsing links
 		if n.Type == html.ElementNode && n.Data == "a" {
 			for _, attr := range n.Attr {
 				if attr.Key != "href" {
@@ -33,17 +45,44 @@ func extractContent(reader io.Reader, domain string) ([]string, error) {
 
 				url := extractURL(attr.Val, domain)
 				if url != "" {
-					urls = append(urls, url)
+					website.outlinks = append(website.outlinks, url)
 				}
 			}
 		}
 
-		// text content
-		if n.Type == html.TextNode {
-			if n.Parent != nil && (n.Parent.Data == "script" || n.Parent.Data == "style") {
-				return
+		//parsing headings
+		isHeading := (n.Data == "h1" || n.Data == "h2" || n.Data == "h3" || n.Data == "h4" || n.Data == "h5" || n.Data == "h6")
+
+		if n.Type == html.ElementNode && isHeading {
+			var headingStr string
+
+			var extractText func(*html.Node)
+			extractText = func(c *html.Node) {
+				if c.Type == html.TextNode {
+					headingStr += c.Data
+				}
+
+				for child := c.FirstChild; child != nil; child = child.NextSibling {
+					extractText(child)
+				}
 			}
 
+			extractText(n)
+			website.headings = headingStr
+
+		}
+
+		//parsing text content
+		if n.Type == html.TextNode && n.Parent != nil {
+			if n.Parent.Data != "script" && n.Parent.Data != "style" &&
+				n.Parent.Data != "h1" && n.Parent.Data != "h2" && n.Parent.Data != "h3" &&
+				n.Parent.Data != "h4" && n.Parent.Data != "h5" && n.Parent.Data != "h6" {
+
+				text := strings.TrimSpace(n.Data)
+				if text != "" {
+					website.content += text
+				}
+			}
 		}
 
 		f(n.FirstChild)
@@ -53,7 +92,7 @@ func extractContent(reader io.Reader, domain string) ([]string, error) {
 
 	f(doc)
 
-	return urls, nil
+	return &website, nil
 
 }
 

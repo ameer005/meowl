@@ -14,13 +14,6 @@ type Crawler struct {
 	logger  *slog.Logger
 }
 
-type Website struct {
-	url       string
-	content   string
-	outlinks  []string
-	backlinks []string
-}
-
 func New(urls []string, logger *slog.Logger) *Crawler {
 	return &Crawler{
 		queue:   urls,
@@ -52,11 +45,12 @@ func (t *Crawler) Start() {
 		)
 
 		reader := strings.NewReader(htmlStr)
-		extractedURLs, err := extractContent(reader, url)
+		websiteData, err := extractContent(reader, url)
 		if err != nil {
 			t.logger.Error(err.Error())
 		}
-		fmt.Printf("\n %v", extractedURLs)
+
+		fmt.Printf("\n %v", websiteData.outlinks)
 
 		if statusCode == 403 {
 		}
