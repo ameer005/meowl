@@ -85,13 +85,23 @@ func extractContent(reader io.Reader, domain string) (*Website, error) {
 			}
 		}
 
+		// images
+		if n.Type == html.ElementNode && n.Data == "img" {
+			for _, img := range n.Attr {
+				if img.Key == "src" && !strings.HasPrefix(img.Val, "data:") {
+					website.images = append(website.images, img.Val)
+				}
+			}
+
+		}
+
 		f(n.FirstChild)
 		f(n.NextSibling)
-
 	}
 
 	f(doc)
 
+	website.crawledAt = time.Now()
 	return &website, nil
 
 }

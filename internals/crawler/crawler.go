@@ -50,7 +50,7 @@ func (t *Crawler) Start() {
 			t.logger.Error(err.Error())
 		}
 
-		fmt.Printf("\n %v", websiteData.outlinks)
+		fmt.Printf("\n %v", websiteData.url)
 
 		if statusCode == 403 {
 		}
