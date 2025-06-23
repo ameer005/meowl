@@ -1,16 +1,25 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ameer005/meowl/internals/crawler"
+	"github.com/ameer005/meowl/internals/storage"
 	"github.com/ameer005/meowl/pkg/logger"
 )
 
 func main() {
+	mongoClient, err := storage.NewMongoConnection("mongodb://localhost:27017")
+
+	if err != nil {
+		os.Exit(1)
+	}
+
 	logger.Init()
 	fs := flag.NewFlagSet("spider", flag.ExitOnError)
 
@@ -26,6 +35,13 @@ func main() {
 
 	input := strings.Split(inputRaw, ",")
 
-	crawl := crawler.New(input, logger.Logger)
-	crawl.Start()
+	crawler := crawler.New(input, logger.Logger, mongoClient)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for i := 0; i < 10; i++ {
+		crawler.Wg.Add(1)
+		go crawler.Start(ctx)
+	}
+	crawler.Wg.Wait()
 }

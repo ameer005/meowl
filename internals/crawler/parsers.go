@@ -7,27 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ameer005/meowl/internals/models"
 	"golang.org/x/net/html"
 )
 
-type Website struct {
-	url string
-	// TODO use string builder for perforance
-	content   string
-	title     []string
-	headings  string
-	outlinks  []string
-	images    []string
-	crawledAt time.Time
-}
-
-func extractContent(reader io.Reader, domain string) (*Website, error) {
-	fmt.Println("running extract content")
+func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 	doc, err := html.Parse(reader)
-	website := Website{}
+	website := models.Website{}
 
 	if err != nil {
-		return &website, fmt.Errorf("Parsing html error: %v", err)
+		return &website, fmt.Errorf("Parser:Parsing html error: %v", err)
 	}
 
 	var f func(*html.Node)
@@ -45,7 +34,7 @@ func extractContent(reader io.Reader, domain string) (*Website, error) {
 
 				url := extractURL(attr.Val, domain)
 				if url != "" {
-					website.outlinks = append(website.outlinks, url)
+					website.Outlinks = append(website.Outlinks, url)
 				}
 			}
 		}
@@ -68,7 +57,7 @@ func extractContent(reader io.Reader, domain string) (*Website, error) {
 			}
 
 			extractText(n)
-			website.headings = headingStr
+			website.Headings = headingStr
 
 		}
 
@@ -80,7 +69,7 @@ func extractContent(reader io.Reader, domain string) (*Website, error) {
 
 				text := strings.TrimSpace(n.Data)
 				if text != "" {
-					website.content += text
+					website.Content += text
 				}
 			}
 		}
@@ -89,7 +78,7 @@ func extractContent(reader io.Reader, domain string) (*Website, error) {
 		if n.Type == html.ElementNode && n.Data == "img" {
 			for _, img := range n.Attr {
 				if img.Key == "src" && !strings.HasPrefix(img.Val, "data:") {
-					website.images = append(website.images, img.Val)
+					website.Images = append(website.Images, img.Val)
 				}
 			}
 
@@ -101,7 +90,7 @@ func extractContent(reader io.Reader, domain string) (*Website, error) {
 
 	f(doc)
 
-	website.crawledAt = time.Now()
+	website.CrawledAt = time.Now()
 	return &website, nil
 
 }

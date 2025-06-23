@@ -1,44 +1,126 @@
 package crawler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/ameer005/meowl/internals/repository"
+	"github.com/ameer005/meowl/pkg/queue"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type Crawler struct {
-	visited map[string]struct{}
-	queue   []string
-	logger  *slog.Logger
+	queue         *queue.Queue[string]
+	seen          map[string]struct{}
+	logger        *slog.Logger
+	websiteRepo   *repository.WebsiteRepo
+	Wg            sync.WaitGroup
+	mu            sync.Mutex
+	activeWorkers int
 }
 
-func New(urls []string, logger *slog.Logger) *Crawler {
+func New(urls []string, logger *slog.Logger, db *mongo.Client) *Crawler {
+
+	q := queue.NewQueue[string]()
+	for _, url := range urls {
+		q.Enqueue(url)
+	}
 	return &Crawler{
-		queue:   urls,
-		visited: make(map[string]struct{}),
-		logger:  logger,
+		queue:         q,
+		seen:          make(map[string]struct{}),
+		logger:        logger,
+		websiteRepo:   repository.NewWebsiteRepo(db.Database("spider")),
+		Wg:            sync.WaitGroup{},
+		activeWorkers: 0,
 	}
 }
 
-func (t *Crawler) Start() {
+func (t *Crawler) Start(ctx context.Context) {
+	defer func() {
+		t.Wg.Done()
+	}()
 
-	processCounter := 0
-
+	// bfs loop
 	for {
-		if processCounter >= len(t.queue) {
-			t.logger.Info("All links have been scraped")
-			return
+
+		t.mu.Lock()
+
+		if t.queue.IsEmpty() {
+			if t.activeWorkers == 0 {
+				t.mu.Unlock()
+				t.logger.Info("All links have been scraped")
+				break
+			}
+
+			// Improve this sleeping time
+			time.Sleep(100 * time.Millisecond)
+			t.mu.Unlock()
+			continue
 		}
 
-		url := t.queue[processCounter]
+		// extracting URL
+		url, ok := t.queue.Dequeue()
+		if !ok {
+			t.mu.Unlock()
+			t.logger.Warn("Queue is empty")
+			break
+		}
 
+		if _, isSeen := t.seen[url]; isSeen {
+			t.mu.Unlock()
+			continue
+		}
+
+		t.seen[url] = struct{}{}
+		t.activeWorkers++
+		t.mu.Unlock()
+
+		// processing url
 		htmlStr, statusCode, contentType, err := t.fetchHTML(url)
 		if err != nil {
 			//TODO handle other errors properly
 			t.logger.Error("Fetch HTML error", slog.String("error", err.Error()))
+
+			t.releaseWorker()
+			continue
 		}
+
+		// Handling http errors
+		if statusCode == 400 {
+			t.logger.Warn("400 error")
+			continue
+		}
+
+		if statusCode == 401 {
+			t.logger.Warn("Authentication Error! skipping...")
+			continue
+
+		}
+
+		if statusCode == 403 {
+			t.logger.Warn("Authorization error! skipping...")
+			continue
+		}
+
+		if statusCode != 200 {
+			continue
+		}
+
+		if contentType == "" {
+		}
+
+		if statusCode != 200 {
+			t.releaseWorker()
+			continue
+		}
+
+		// Parsing HTML
 		t.logger.Info("Fetched",
 			slog.String("url", url),
 			slog.Int("status_code", statusCode),
@@ -50,17 +132,33 @@ func (t *Crawler) Start() {
 			t.logger.Error(err.Error())
 		}
 
-		fmt.Printf("\n %v", websiteData.url)
+		// updating queue
+		t.mu.Lock()
+		for _, newURL := range websiteData.Outlinks {
+			t.queue.Enqueue(newURL)
+		}
+		t.mu.Unlock()
 
-		if statusCode == 403 {
+		t.logger.Info("Fetched", "url", url)
+
+		fetchedWebsite, err := t.websiteRepo.GetByURL(ctx, url)
+
+		if err != nil {
+			t.logger.Warn("fetch website error", "error", err)
 		}
 
-		if contentType == "" {
+		// TODO: maybe move this logic to upwards
+		// data exist
+		if fetchedWebsite != nil {
+			t.releaseWorker()
+			continue
 		}
 
-		fmt.Println()
-		processCounter += 1
+		t.releaseWorker()
+
 	}
+
+	t.logger.Info("Crawler existed", "active workers", t.activeWorkers)
 
 }
 
@@ -90,7 +188,15 @@ func (t *Crawler) fetchHTML(url string) (string, int, string, error) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		return "", r.StatusCode, contentType, fmt.Errorf("Body reading error: %v", err)
+
+		// bodyBytes = append(bodyBytes,  zzz)
 	}
 
 	return string(bodyBytes), r.StatusCode, contentType, nil
+}
+
+func (c *Crawler) releaseWorker() {
+	c.mu.Lock()
+	c.activeWorkers--
+	c.mu.Unlock()
 }
