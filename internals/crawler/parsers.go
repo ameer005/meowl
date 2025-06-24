@@ -13,7 +13,7 @@ import (
 
 func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 	doc, err := html.Parse(reader)
-	website := models.Website{}
+	website := models.Website{Url: domain}
 
 	if err != nil {
 		return &website, fmt.Errorf("Parser:Parsing html error: %v", err)

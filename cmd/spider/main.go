@@ -11,10 +11,13 @@ import (
 	"github.com/ameer005/meowl/internals/crawler"
 	"github.com/ameer005/meowl/internals/storage"
 	"github.com/ameer005/meowl/pkg/logger"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	mongoClient, err := storage.NewMongoConnection("mongodb://localhost:27017")
+	godotenv.Load()
+
+	mongoClient, err := storage.NewMongoConnection(os.Getenv("MONGO_URL"))
 
 	if err != nil {
 		os.Exit(1)

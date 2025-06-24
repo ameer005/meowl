@@ -84,8 +84,7 @@ func (t *Crawler) Start(ctx context.Context) {
 		// processing url
 		htmlStr, statusCode, contentType, err := t.fetchHTML(url)
 		if err != nil {
-			//TODO handle other errors properly
-			t.logger.Error("Fetch HTML error", slog.String("error", err.Error()))
+			t.logger.Error("Fetch HTML error", slog.String("url", url), slog.String("error", err.Error()))
 
 			t.releaseWorker()
 			continue
@@ -135,6 +134,10 @@ func (t *Crawler) Start(ctx context.Context) {
 		// updating queue
 		t.mu.Lock()
 		for _, newURL := range websiteData.Outlinks {
+			if _, isSeen := t.seen[newURL]; isSeen {
+				continue
+			}
+
 			t.queue.Enqueue(newURL)
 		}
 		t.mu.Unlock()
@@ -152,6 +155,11 @@ func (t *Crawler) Start(ctx context.Context) {
 		if fetchedWebsite != nil {
 			t.releaseWorker()
 			continue
+		}
+
+		err = t.websiteRepo.AddWebsite(ctx, websiteData)
+		if err != nil {
+			t.logger.Error("Inser website to db error", "error", err)
 		}
 
 		t.releaseWorker()

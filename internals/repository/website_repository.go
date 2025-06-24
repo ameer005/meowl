@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ameer005/meowl/internals/models"
 	"go.mongodb.org/mongo-driver/bson"
@@ -20,17 +21,21 @@ func NewWebsiteRepo(db *mongo.Database) *WebsiteRepo {
 }
 
 func (w *WebsiteRepo) GetByURL(ctx context.Context, url string) (*models.Website, error) {
-	var website *models.Website
-	err := w.collection.FindOne(ctx, bson.M{"url": url}).Decode(website)
+	var website models.Website
+	err := w.collection.FindOne(ctx, bson.M{"url": url}).Decode(&website)
 
 	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
-	return website, nil
+	return &website, nil
 }
 
-func (w *WebsiteRepo) addWebsite(ctx context.Context, data *models.Website) error {
+func (w *WebsiteRepo) AddWebsite(ctx context.Context, data *models.Website) error {
+	_, err := w.collection.InsertOne(ctx, data)
 
-	return nil
+	return err
 }
