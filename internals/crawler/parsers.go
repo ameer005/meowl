@@ -19,6 +19,11 @@ func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 		return &website, fmt.Errorf("Parser:Parsing html error: %v", err)
 	}
 
+	parsedDomain, err := url.ParseRequestURI(domain)
+	if err != nil {
+		return &website, err
+	}
+
 	var f func(*html.Node)
 	f = func(n *html.Node) {
 		if n == nil {
@@ -32,9 +37,22 @@ func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 					continue
 				}
 
-				url := extractURL(attr.Val, domain)
-				if url != "" {
-					website.Outlinks = append(website.Outlinks, url)
+				processedURL := extractURL(attr.Val, domain)
+				if processedURL != "" {
+					// separating internal and external Links
+					parsedURL, err := url.ParseRequestURI(processedURL)
+					if err != nil {
+						continue
+					}
+
+					domainHost := parsedDomain.Hostname()
+					linkHost := parsedURL.Hostname()
+
+					if linkHost == domainHost {
+						website.InternalLinks = append(website.InternalLinks, processedURL)
+					} else {
+						website.ExternalLinks = append(website.ExternalLinks, processedURL)
+					}
 				}
 			}
 		}
@@ -78,7 +96,8 @@ func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 		if n.Type == html.ElementNode && n.Data == "img" {
 			for _, img := range n.Attr {
 				if img.Key == "src" && !strings.HasPrefix(img.Val, "data:") {
-					website.Images = append(website.Images, img.Val)
+					imageSrc := extractURL(img.Val, domain)
+					website.Images = append(website.Images, imageSrc)
 				}
 			}
 

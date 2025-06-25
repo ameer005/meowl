@@ -39,7 +39,7 @@ func main() {
 	input := strings.Split(inputRaw, ",")
 
 	crawler := crawler.New(input, logger.Logger, mongoClient)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	for i := 0; i < 10; i++ {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,13 +17,12 @@ import (
 )
 
 type Crawler struct {
-	queue         *queue.Queue[string]
-	seen          map[string]struct{}
-	logger        *slog.Logger
-	websiteRepo   *repository.WebsiteRepo
-	Wg            sync.WaitGroup
-	mu            sync.Mutex
-	activeWorkers int
+	queue       *queue.Queue[string]
+	seen        map[string]struct{}
+	logger      *slog.Logger
+	websiteRepo *repository.WebsiteRepo
+	Wg          sync.WaitGroup
+	mu          sync.Mutex
 }
 
 func New(urls []string, logger *slog.Logger, db *mongo.Client) *Crawler {
@@ -32,12 +32,11 @@ func New(urls []string, logger *slog.Logger, db *mongo.Client) *Crawler {
 		q.Enqueue(url)
 	}
 	return &Crawler{
-		queue:         q,
-		seen:          make(map[string]struct{}),
-		logger:        logger,
-		websiteRepo:   repository.NewWebsiteRepo(db.Database("spider")),
-		Wg:            sync.WaitGroup{},
-		activeWorkers: 0,
+		queue:       q,
+		seen:        make(map[string]struct{}),
+		logger:      logger,
+		websiteRepo: repository.NewWebsiteRepo(db.Database("spider")),
+		Wg:          sync.WaitGroup{},
 	}
 }
 
@@ -45,6 +44,11 @@ func (t *Crawler) Start(ctx context.Context) {
 	defer func() {
 		t.Wg.Done()
 	}()
+	workerID := rand.Intn(10000)
+	t.logger.Info("Worker started", slog.Int("worker_id", workerID))
+
+	idleCount := 0
+	maxCount := 20
 
 	// bfs loop
 	for {
@@ -52,17 +56,23 @@ func (t *Crawler) Start(ctx context.Context) {
 		t.mu.Lock()
 
 		if t.queue.IsEmpty() {
-			if t.activeWorkers == 0 {
-				t.mu.Unlock()
-				t.logger.Info("All links have been scraped")
-				break
+			t.mu.Unlock()
+			idleCount++
+			if idleCount >= maxCount {
+				t.logger.Info("Worker exiting due to idle timeout",
+					slog.Int("worker_id", workerID),
+					slog.Int("idle_count", idleCount),
+				)
+
+				return
 			}
 
 			// Improve this sleeping time
 			time.Sleep(100 * time.Millisecond)
-			t.mu.Unlock()
 			continue
 		}
+
+		idleCount = 0
 
 		// extracting URL
 		url, ok := t.queue.Dequeue()
@@ -78,53 +88,44 @@ func (t *Crawler) Start(ctx context.Context) {
 		}
 
 		t.seen[url] = struct{}{}
-		t.activeWorkers++
 		t.mu.Unlock()
 
 		// processing url
 		htmlStr, statusCode, contentType, err := t.fetchHTML(url)
 		if err != nil {
-			t.logger.Error("Fetch HTML error", slog.String("url", url), slog.String("error", err.Error()))
-
-			t.releaseWorker()
+			t.logger.Error("Fetch failed",
+				slog.String("url", url),
+				slog.Int("worker_id", workerID),
+				slog.String("error", err.Error()),
+				slog.Int("status_code", statusCode),
+			)
 			continue
 		}
 
-		// Handling http errors
-		if statusCode == 400 {
-			t.logger.Warn("400 error")
-			continue
-		}
-
-		if statusCode == 401 {
-			t.logger.Warn("Authentication Error! skipping...")
-			continue
-
-		}
-
-		if statusCode == 403 {
-			t.logger.Warn("Authorization error! skipping...")
-			continue
-		}
+		t.logger.Info("Fetched",
+			slog.String("url", url),
+			slog.Int("worker_id", workerID),
+			slog.Int("status_code", statusCode),
+			slog.String("content_type", contentType),
+		)
 
 		if statusCode != 200 {
+			t.logger.Warn("Non-200 status code",
+				slog.String("url", url),
+				slog.Int("status_code", statusCode),
+			)
 			continue
 		}
 
-		if contentType == "" {
-		}
-
-		if statusCode != 200 {
-			t.releaseWorker()
+		if !strings.HasPrefix(contentType, "text/html") {
+			t.logger.Warn("Skipping non-HTML content",
+				slog.String("url", url),
+				slog.String("content_type", contentType),
+			)
 			continue
 		}
 
 		// Parsing HTML
-		t.logger.Info("Fetched",
-			slog.String("url", url),
-			slog.Int("status_code", statusCode),
-		)
-
 		reader := strings.NewReader(htmlStr)
 		websiteData, err := extractContent(reader, url)
 		if err != nil {
@@ -133,7 +134,15 @@ func (t *Crawler) Start(ctx context.Context) {
 
 		// updating queue
 		t.mu.Lock()
-		for _, newURL := range websiteData.Outlinks {
+		for _, newURL := range websiteData.ExternalLinks {
+			if _, isSeen := t.seen[newURL]; isSeen {
+				continue
+			}
+
+			t.queue.Enqueue(newURL)
+		}
+
+		for _, newURL := range websiteData.InternalLinks {
 			if _, isSeen := t.seen[newURL]; isSeen {
 				continue
 			}
@@ -142,41 +151,34 @@ func (t *Crawler) Start(ctx context.Context) {
 		}
 		t.mu.Unlock()
 
-		t.logger.Info("Fetched", "url", url)
-
-		fetchedWebsite, err := t.websiteRepo.GetByURL(ctx, url)
-
+		existing, err := t.websiteRepo.GetByURL(ctx, url)
 		if err != nil {
-			t.logger.Warn("fetch website error", "error", err)
+			t.logger.Warn("DB lookup failed", slog.String("url", url), slog.String("error", err.Error()))
 		}
 
-		// TODO: maybe move this logic to upwards
-		// data exist
-		if fetchedWebsite != nil {
-			t.releaseWorker()
-			continue
+		if existing == nil {
+			if err := t.websiteRepo.AddWebsite(ctx, websiteData); err != nil {
+				t.logger.Error("Failed to insert website to DB", slog.String("url", url), slog.String("error", err.Error()))
+			} else {
+				t.logger.Info("Website inserted to DB", slog.String("url", url))
+			}
+		} else {
+			t.logger.Debug("Website already exists in DB", slog.String("url", url))
 		}
 
-		err = t.websiteRepo.AddWebsite(ctx, websiteData)
-		if err != nil {
-			t.logger.Error("Inser website to db error", "error", err)
-		}
-
-		t.releaseWorker()
-
+		delay := randomDelay(2, 5)
+		t.logger.Debug("Sleeping after URL", slog.Int("worker_id", workerID), slog.Duration("sleep", delay))
 	}
-
-	t.logger.Info("Crawler existed", "active workers", t.activeWorkers)
 
 }
 
 func (t *Crawler) fetchHTML(url string) (string, int, string, error) {
-	fmt.Printf("Fetching %s \n", url)
 
 	r, err := http.Get(url)
 
 	if err != nil {
-		return "", r.StatusCode, "", fmt.Errorf("fetching url  %v", err)
+
+		return "", 0, "", err // use 0 or -1 as dummy status code
 	}
 
 	defer r.Body.Close()
@@ -196,15 +198,13 @@ func (t *Crawler) fetchHTML(url string) (string, int, string, error) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		return "", r.StatusCode, contentType, fmt.Errorf("Body reading error: %v", err)
-
-		// bodyBytes = append(bodyBytes,  zzz)
 	}
 
 	return string(bodyBytes), r.StatusCode, contentType, nil
 }
 
-func (c *Crawler) releaseWorker() {
-	c.mu.Lock()
-	c.activeWorkers--
-	c.mu.Unlock()
+func randomDelay(min, max int) time.Duration {
+	delay := time.Duration(rand.Intn(max-min+1)+min) * time.Second
+	time.Sleep(delay)
+	return delay
 }
