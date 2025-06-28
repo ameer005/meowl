@@ -17,11 +17,11 @@ import (
 func main() {
 	godotenv.Load()
 
-	mongoClient, err := storage.NewMongoConnection(os.Getenv("MONGO_URL"))
-
+	postgresClient, err := storage.NewPostgresConnection(os.Getenv("POSTGRES_URL"))
 	if err != nil {
 		os.Exit(1)
 	}
+	defer postgresClient.Close()
 
 	logger.Init()
 	fs := flag.NewFlagSet("spider", flag.ExitOnError)
@@ -38,8 +38,8 @@ func main() {
 
 	input := strings.Split(inputRaw, ",")
 
-	crawler := crawler.New(input, logger.Logger, mongoClient)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	crawler := crawler.New(input, logger.Logger, postgresClient)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	for i := 0; i < 10; i++ {

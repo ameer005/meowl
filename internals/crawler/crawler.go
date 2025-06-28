@@ -2,6 +2,8 @@ package crawler
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,19 +15,18 @@ import (
 
 	"github.com/ameer005/meowl/internals/repository"
 	"github.com/ameer005/meowl/pkg/queue"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type Crawler struct {
 	queue       *queue.Queue[string]
 	seen        map[string]struct{}
 	logger      *slog.Logger
-	websiteRepo *repository.WebsiteRepo
+	websiteRepo *repository.PostgresWebsiteRepo
 	Wg          sync.WaitGroup
 	mu          sync.Mutex
 }
 
-func New(urls []string, logger *slog.Logger, db *mongo.Client) *Crawler {
+func New(urls []string, logger *slog.Logger, db *sql.DB) *Crawler {
 
 	q := queue.NewQueue[string]()
 	for _, url := range urls {
@@ -35,7 +36,7 @@ func New(urls []string, logger *slog.Logger, db *mongo.Client) *Crawler {
 		queue:       q,
 		seen:        make(map[string]struct{}),
 		logger:      logger,
-		websiteRepo: repository.NewWebsiteRepo(db.Database("spider")),
+		websiteRepo: repository.NewPostgresWebsiteRepo(db),
 		Wg:          sync.WaitGroup{},
 	}
 }
@@ -151,18 +152,21 @@ func (t *Crawler) Start(ctx context.Context) {
 		}
 		t.mu.Unlock()
 
-		existing, err := t.websiteRepo.GetByURL(ctx, url)
+		_, err = t.websiteRepo.GetByurl(ctx, url)
 		if err != nil {
-			t.logger.Warn("DB lookup failed", slog.String("url", url), slog.String("error", err.Error()))
-		}
-
-		if existing == nil {
-			if err := t.websiteRepo.AddWebsite(ctx, websiteData); err != nil {
-				t.logger.Error("Failed to insert website to DB", slog.String("url", url), slog.String("error", err.Error()))
+			if errors.Is(err, sql.ErrNoRows) {
+				// Not found — proceed to insert
+				if err := t.websiteRepo.InsertWebsite(ctx, websiteData); err != nil {
+					t.logger.Error("Failed to insert website to DB", slog.String("url", url), slog.String("error", err.Error()))
+				} else {
+					t.logger.Info("Website inserted to DB", slog.String("url", url))
+				}
 			} else {
-				t.logger.Info("Website inserted to DB", slog.String("url", url))
+				// Actual DB error
+				t.logger.Warn("DB lookup failed", slog.String("url", url), slog.String("error", err.Error()))
 			}
 		} else {
+			// Record already exists
 			t.logger.Debug("Website already exists in DB", slog.String("url", url))
 		}
 

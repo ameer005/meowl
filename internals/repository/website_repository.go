@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"log"
+	"time"
 
 	"github.com/ameer005/meowl/internals/models"
 	"go.mongodb.org/mongo-driver/bson"
@@ -11,12 +13,14 @@ import (
 
 type WebsiteRepo struct {
 	collection *mongo.Collection
-	ctx        context.Context
 }
 
 func NewWebsiteRepo(db *mongo.Database) *WebsiteRepo {
+	coll := db.Collection("websites")
+	createWebsiteIndexes(coll)
+
 	return &WebsiteRepo{
-		collection: db.Collection("websites"),
+		collection: coll,
 	}
 }
 
@@ -37,5 +41,20 @@ func (w *WebsiteRepo) GetByURL(ctx context.Context, url string) (*models.Website
 func (w *WebsiteRepo) AddWebsite(ctx context.Context, data *models.Website) error {
 	_, err := w.collection.InsertOne(ctx, data)
 
+	docBytes, _ := bson.Marshal(data)
+	log.Printf("Size: %d bytes", len(docBytes))
+
+	return err
+}
+
+func createWebsiteIndexes(collection *mongo.Collection) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	indexModel := mongo.IndexModel{
+		Keys: bson.D{{Key: "url", Value: 1}}, // Ascending index on "url"
+	}
+
+	_, err := collection.Indexes().CreateOne(ctx, indexModel)
 	return err
 }

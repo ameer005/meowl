@@ -1,16 +1,19 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/lib/pq"
+)
 
 type Website struct {
-	Url     string `bson:"url"`
-	Content string `bson:"content"`
-
-	Title         []string  `bson:"title"`
-	Headings      string    `bson:"headings"`
-	Outlinks      []string  `bson:"outlinks"`
-	InternalLinks []string  `bson:"internalLinks"`
-	ExternalLinks []string  `bson:"externalLinks"`
-	Images        []string  `bson:"images"`
-	CrawledAt     time.Time `bson:"crawledAt"`
+	Id            int            `db:"id"`
+	Url           string         `db:"url"`
+	Content       string         `db:"content"`
+	Title         string         `db:"title"`
+	Headings      string         `db:"headings"`
+	InternalLinks pq.StringArray `db:"internal_links"`
+	ExternalLinks pq.StringArray `db:"external_links"`
+	Images        pq.StringArray `db:"images"`
+	CrawledAt     time.Time      `db:"crawled_at"`
 }
