@@ -3,10 +3,11 @@ CREATE TABLE IF NOT EXISTS websites (
   url TEXT UNIQUE,
   content TEXT,
   title TEXT,
-  headings TEXT,
+  headings TEXT[],
   internal_links TEXT[],
   external_links TEXT[],
   images TEXT[],
-  crawled_at TIMESTAMP DEFAULT NOW()
+  crawled_at TIMESTAMP DEFAULT NOW(),
+  description TEXT
 );
 

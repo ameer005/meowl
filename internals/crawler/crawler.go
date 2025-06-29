@@ -152,11 +152,11 @@ func (t *Crawler) Start(ctx context.Context) {
 		}
 		t.mu.Unlock()
 
-		_, err = t.websiteRepo.GetByurl(ctx, url)
+		_, err = t.websiteRepo.GetByurl(url)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// Not found — proceed to insert
-				if err := t.websiteRepo.InsertWebsite(ctx, websiteData); err != nil {
+				if err := t.websiteRepo.InsertWebsite(websiteData); err != nil {
 					t.logger.Error("Failed to insert website to DB", slog.String("url", url), slog.String("error", err.Error()))
 				} else {
 					t.logger.Info("Website inserted to DB", slog.String("url", url))

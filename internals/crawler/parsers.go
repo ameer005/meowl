@@ -8,12 +8,22 @@ import (
 	"time"
 
 	"github.com/ameer005/meowl/internals/models"
+	"github.com/lib/pq"
 	"golang.org/x/net/html"
 )
 
 func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 	doc, err := html.Parse(reader)
-	website := models.Website{Url: domain, Headings: ""}
+	website := models.Website{
+		Url:           domain,
+		Title:         "",
+		Headings:      pq.StringArray{},
+		Content:       "",
+		InternalLinks: pq.StringArray{},
+		ExternalLinks: pq.StringArray{},
+		Images:        pq.StringArray{},
+		Description:   "",
+	}
 
 	if err != nil {
 		return &website, fmt.Errorf("Parser:Parsing html error: %v", err)
@@ -57,6 +67,39 @@ func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 			}
 		}
 
+		// parsing headings
+		if n.Type == html.ElementNode && n.Data == "title" {
+			if n.FirstChild != nil {
+				title := strings.TrimSpace(n.FirstChild.Data)
+				if title != "" {
+					website.Title = title
+				}
+
+			}
+			website.Title = n.FirstChild.Data
+		}
+
+		// parsing meta description
+		if n.Type == html.ElementNode && n.Data == "meta" {
+			isDescription := false
+			for _, attr := range n.Attr {
+				if attr.Val == "description" {
+					isDescription = true
+				}
+			}
+
+			if isDescription {
+				for _, attr := range n.Attr {
+					if attr.Key == "content" {
+						if attr.Val != "" {
+							fmt.Println(attr.Val)
+						}
+					}
+				}
+			}
+
+		}
+
 		//parsing headings
 		isHeading := (n.Data == "h1" || n.Data == "h2" || n.Data == "h3" || n.Data == "h4" || n.Data == "h5" || n.Data == "h6")
 
@@ -75,7 +118,7 @@ func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 			}
 
 			extractText(n)
-			website.Headings = headingStr
+			website.Headings = append(website.Headings, headingStr)
 
 		}
 
