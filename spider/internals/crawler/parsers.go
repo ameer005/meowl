@@ -75,8 +75,9 @@ func extractContent(reader io.Reader, domain string) (*models.Website, error) {
 					website.Title = title
 				}
 
+				website.Title = n.FirstChild.Data
+
 			}
-			website.Title = n.FirstChild.Data
 		}
 
 		// parsing meta description
