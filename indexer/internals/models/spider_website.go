@@ -1,0 +1,20 @@
+package models
+
+import (
+	"time"
+
+	"github.com/lib/pq"
+)
+
+type SpiderWebsite struct {
+	Id            int            `db:"id"`
+	Url           string         `db:"url"`
+	Content       string         `db:"content"`
+	Title         string         `db:"title"`
+	Headings      pq.StringArray `db:"headings"`
+	InternalLinks pq.StringArray `db:"internal_links"`
+	ExternalLinks pq.StringArray `db:"external_links"`
+	Images        pq.StringArray `db:"images"`
+	CrawledAt     time.Time      `db:"crawled_at"`
+	Description   string         `db:"description"`
+}
